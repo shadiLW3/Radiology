@@ -1,0 +1,12 @@
+# Phase 0 — offline dermoscopy segmentation spike
+torch>=2.0
+torchvision>=0.15
+segmentation-models-pytorch>=0.3.3
+onnx>=1.14
+onnxruntime>=1.15
+numpy>=1.23,<2   # torch 2.2 (last cp39 wheel) is built against NumPy 1.x
+pillow>=9.0
+pandas>=1.5
+matplotlib>=3.6
+tqdm>=4.64
+requests>=2.28

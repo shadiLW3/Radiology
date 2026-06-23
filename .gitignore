@@ -1,0 +1,22 @@
+# data + model artifacts (regenerated)
+ml/data/
+ml/models/
+ml/reports/*.png
+ml/reports/*.json
+web/data/
+*.onnx
+*.pt
+archive/**/data/
+archive/**/models/
+archive/**/reports/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
+.DS_Store
+
+# local tooling
+.claude/
