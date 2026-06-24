@@ -1,5 +1,5 @@
 // MedVS-AI Phase 1 — vanilla JS + Konva. Draw the lesion -> lock -> reveal vs the model.
-const DISPLAY = 480;        // stage size in px
+const DISPLAY = 600;        // stage size in px
 const GRID = 256;           // server scoring grid; export at this resolution
 const K = GRID / DISPLAY;   // image-space -> grid scale
 
@@ -103,15 +103,29 @@ stage.on("pointermove", () => {
   state.drawing.node.points(state.drawing.node.points().concat([p.x, p.y]));
   drawLayer.batchDraw();
 });
-stage.on("pointerup", () => {
+function finishStroke() {
   if (!state.drawing) return;
   if (state.drawing.tool === "lasso") state.drawing.node.closed(true);
   drawLayer.batchDraw();
   state.shapes.push(state.drawing); state.drawing = null;
   updateLockEnabled();
-});
-function undo() { const s = state.shapes.pop(); if (s) { s.node.destroy(); drawLayer.draw(); } updateLockEnabled(); }
-function clearAll() { state.shapes.forEach((s) => s.node.destroy()); state.shapes = []; drawLayer.draw(); updateLockEnabled(); }
+}
+stage.on("pointerup", finishStroke);
+// Also finalize when the pointer is released OUTSIDE the canvas (common when tracing to the edge) —
+// otherwise that stroke stays orphaned in state.drawing and Undo/Clear can't remove it.
+window.addEventListener("pointerup", finishStroke);
+window.addEventListener("pointercancel", finishStroke);
+
+function undo() {
+  if (state.drawing) { state.drawing.node.destroy(); state.drawing = null; }  // drop an in-progress stroke
+  else { const s = state.shapes.pop(); if (s) s.node.destroy(); }
+  drawLayer.draw(); updateLockEnabled();
+}
+function clearAll() {
+  state.shapes.forEach((s) => s.node.destroy()); state.shapes = [];
+  if (state.drawing) { state.drawing.node.destroy(); state.drawing = null; }  // also drop in-progress
+  drawLayer.draw(); updateLockEnabled();
+}
 
 // Rasterize stored image-space strokes onto a 256x256 mask (transform-independent).
 function exportMaskDataUrl() {

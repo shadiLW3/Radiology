@@ -11,72 +11,57 @@
   <div class="banner">RESEARCH / EDUCATIONAL DEMO — NOT FOR CLINICAL USE. No output is a diagnosis.</div>
   <div class="wrap">
     <header>
-      <h1>MedVS-AI <small>— draw the lesion, diagnose it, then see how you did vs. the model</small></h1>
-      <div class="group" style="min-width:180px">
+      <h1>MedVS-AI</h1>
+      <div class="group">
         <label for="modality">Modality</label>
         <select id="modality"></select>
       </div>
-      <div class="group" style="min-width:200px">
-        <label for="badge">Your background (unverified)</label>
+      <div class="group">
+        <label for="badge">Background (unverified)</label>
         <select id="badge">
           <option value="layperson">Layperson</option>
           <option value="medical_student">Medical student</option>
           <option value="physician">Physician (MD/DO)</option>
-          <option value="specialist">Dermatologist / specialist</option>
+          <option value="specialist">Specialist</option>
         </select>
       </div>
     </header>
 
-    <!-- CREDENTIAL -->
-    <div class="card" id="cred-card">
-      <h2>Verify clinician status <small class="hint">(optional — badges you, never gates)</small></h2>
-      <div id="cred-status" class="hint">Not verified — you'll play as your self-reported background.</div>
-      <div class="row" style="align-items:flex-end; gap:10px; margin-top:10px">
-        <div class="group"><label>NPI number</label><input id="npi" placeholder="10 digits" maxlength="10"></div>
-        <div class="group"><label>First name</label><input id="npi-first"></div>
-        <div class="group"><label>Last name</label><input id="npi-last"></div>
-        <button id="verify-btn">Verify</button>
-      </div>
-      <p class="hint">We check your NPI against the public NPPES registry to <b>label</b> (not gate) your
-        background. NPPES doesn't prove identity — it confirms the NPI is real, active, and carries a
-        physician specialty. We store only your badge, specialty, name-match, and the last 4 digits.</p>
-    </div>
-
-    <!-- PLAY -->
+    <!-- PLAY: big image + controls side by side -->
     <div class="card" id="play-card">
-      <h2 id="case-title">Case</h2>
-      <div class="row">
-        <div>
+      <h2 id="case-title">Loading…</h2>
+      <div class="play-grid">
+        <div class="canvas-col">
           <div class="stage-wrap" id="stage-wrap"><div id="stage"></div></div>
-          <p class="hint" style="max-width:480px">🔍 scroll to zoom · hold <b>space</b> + drag to pan · <b>[ ]</b> brush size · <b>1/2/3</b> tools · <b>z</b> undo</p>
+          <p class="hint">🔍 scroll = zoom · hold <b>space</b> + drag = pan · <b>[ ]</b> brush size · <b>1/2/3</b> tools · <b>z</b> undo</p>
         </div>
         <div class="controls">
           <div class="group">
             <label>Tool</label>
             <div class="btnrow">
-              <button id="tool-lasso" class="active" data-tool="lasso">Lasso (trace)</button>
-              <button id="tool-brush" data-tool="brush">Brush</button>
-              <button id="tool-eraser" data-tool="eraser">Eraser</button>
+              <button id="tool-lasso" class="active">✏️ Lasso</button>
+              <button id="tool-brush">🖌️ Brush</button>
+              <button id="tool-eraser">🧽 Eraser</button>
             </div>
           </div>
           <div class="group">
-            <label>Brush size: <span id="size-val">22</span>px</label>
-            <input type="range" id="brush-size" min="4" max="60" value="22">
+            <label>Brush size: <span id="size-val">22</span> px</label>
+            <input type="range" id="brush-size" min="4" max="80" value="22">
           </div>
           <div class="group">
-            <label>Brightness: <span id="bright-val">1.00</span></label>
-            <input type="range" id="brightness" min="0.5" max="1.6" step="0.01" value="1">
+            <label>Brightness <span id="bright-val">1.00</span></label>
+            <input type="range" id="brightness" min="0.5" max="1.8" step="0.01" value="1">
           </div>
           <div class="group">
-            <label>Contrast: <span id="contrast-val">1.00</span></label>
-            <input type="range" id="contrast" min="0.5" max="2" step="0.01" value="1">
+            <label>Contrast <span id="contrast-val">1.00</span></label>
+            <input type="range" id="contrast" min="0.5" max="2.2" step="0.01" value="1">
           </div>
           <div class="btnrow">
-            <button id="undo">Undo</button>
-            <button id="clear">Clear</button>
-            <button id="reset-view">Reset view</button>
+            <button id="undo">↶ Undo</button>
+            <button id="clear">✕ Clear</button>
+            <button id="reset-view">⟲ Reset view</button>
           </div>
-
+          <hr>
           <div class="group">
             <label>Your diagnosis</label>
             <div class="btnrow" id="dx-buttons"></div>
@@ -85,8 +70,7 @@
             <label>Confidence: <span id="conf-val">50</span>%</label>
             <input type="range" id="confidence" min="0" max="100" value="50">
           </div>
-
-          <button id="lock" class="primary" disabled>Lock &amp; reveal</button>
+          <button id="lock" class="primary" disabled>🔒 Lock &amp; reveal</button>
           <p class="hint" id="lock-hint"></p>
         </div>
       </div>
@@ -102,16 +86,30 @@
         <div class="thumb"><img id="rv-model"><span>Model</span></div>
         <div class="thumb"><img id="rv-gt"><span>Ground truth</span></div>
       </div>
-      <table id="metrics-table" style="margin-top:14px"></table>
+      <table id="metrics-table"></table>
       <p class="hint" id="context-note"></p>
-      <button id="next" class="primary" style="margin-top:8px">Next case →</button>
+      <button id="next" class="primary">Next case →</button>
     </div>
 
     <!-- LEADERBOARD -->
     <div class="card">
-      <h2>Leaderboard <small class="hint">(by self-reported background)</small></h2>
+      <h2>Leaderboard <small class="hint">(by background)</small></h2>
       <table id="leaderboard"></table>
     </div>
+
+    <!-- VERIFY (collapsed, out of the way) -->
+    <details class="card" id="cred-card">
+      <summary>🩺 Verify clinician status <span class="hint">— optional; badges you, never gates</span></summary>
+      <div id="cred-status" class="hint" style="margin-top:10px">Not verified — you'll play as your self-reported background.</div>
+      <div class="row" style="align-items:flex-end; gap:10px; margin-top:10px">
+        <div class="group"><label>NPI number</label><input id="npi" placeholder="10 digits" maxlength="10"></div>
+        <div class="group"><label>First name</label><input id="npi-first"></div>
+        <div class="group"><label>Last name</label><input id="npi-last"></div>
+        <button id="verify-btn">Verify</button>
+      </div>
+      <p class="hint">We check your NPI against the public NPPES registry to <b>label</b> (not gate) your background.
+        NPPES doesn't prove identity. We store only your badge, specialty, name-match, and the last 4 digits.</p>
+    </details>
   </div>
   <script src="/static/app.js"></script>
 </body>
