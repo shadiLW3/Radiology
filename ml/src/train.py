@@ -1,7 +1,7 @@
-"""Step 3 — Train a U-Net (EfficientNet-B0 encoder) for lesion segmentation.
+"""Step 3 — Train the from-scratch Attention U-Net for lesion segmentation.
 
-Loss = Dice + BCE (standard, robust to the mild class imbalance in dermoscopy).
-Tracks validation Dice each epoch and saves the best checkpoint.
+Model + loss are hand-built (see unet.py): no segmentation_models_pytorch.
+Loss = Dice + BCE. Tracks validation Dice each epoch and saves the best checkpoint.
 """
 import os
 import sys
@@ -12,28 +12,21 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import numpy as np
 
 from config import (MANIFEST_CSV, MODEL_PATH, MODELS_DIR, REPORTS_DIR, TRAIN_CURVE,
-                    ENCODER, ENCODER_WEIGHTS, BATCH_SIZE, EPOCHS, LR, IMG_SIZE,
-                    RANDOM_SEED, DECODER_ATTENTION, pick_device)
+                    BASE, BATCH_SIZE, EPOCHS, LR, IMG_SIZE, RANDOM_SEED, pick_device)
 from dataset import load_manifest, split_manifest, ISICDataset
 from metrics import dice_coef
+from unet import AttentionUNet, dice_bce_loss
 from utils import get_logger, ensure_dir, set_seed
 
 log = get_logger("train")
 
 
 def build_model():
-    import segmentation_models_pytorch as smp
-    return smp.Unet(encoder_name=ENCODER, encoder_weights=ENCODER_WEIGHTS,
-                    in_channels=3, classes=1, activation=None,
-                    decoder_attention_type=DECODER_ATTENTION)
+    return AttentionUNet(in_ch=3, out_ch=1, base=BASE)
 
 
 def make_loss():
-    import torch.nn as nn
-    import segmentation_models_pytorch as smp
-    dice = smp.losses.DiceLoss(mode="binary", from_logits=True)
-    bce = nn.BCEWithLogitsLoss()
-    return lambda logits, y: dice(logits, y) + bce(logits, y)
+    return dice_bce_loss
 
 
 def evaluate_dice(model, loader, device) -> float:
@@ -58,7 +51,7 @@ def main() -> None:
     ensure_dir(MODELS_DIR)
     ensure_dir(REPORTS_DIR)
     device = pick_device()
-    log.info("Device: %s | encoder=%s weights=%s", device, ENCODER, ENCODER_WEIGHTS)
+    log.info("Device: %s | Attention U-Net (from scratch), base=%d", device, BASE)
 
     df = load_manifest(MANIFEST_CSV)
     train_df, val_df = split_manifest(df)

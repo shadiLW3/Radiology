@@ -51,9 +51,9 @@ def make_synthetic(root: str) -> str:
 def main() -> None:
     import torch
     from torch.utils.data import DataLoader
-    import segmentation_models_pytorch as smp
     from dataset import load_manifest, split_manifest, ISICDataset
     from metrics import dice_coef
+    from unet import AttentionUNet, dice_bce_loss
 
     tmp = tempfile.mkdtemp(prefix="isic_smoke_")
     log.info("Synthetic data in %s", tmp)
@@ -64,9 +64,8 @@ def main() -> None:
     train_dl = DataLoader(ISICDataset(train_df, SIZE, augment=True), batch_size=8, shuffle=True)
     val_ds = ISICDataset(val_df, SIZE, augment=False)
 
-    model = smp.Unet("resnet18", encoder_weights=None, in_channels=3, classes=1,
-                     decoder_attention_type="scse")
-    loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
+    model = AttentionUNet(in_ch=3, out_ch=1, base=8)   # small base for a fast smoke test
+    loss_fn = dice_bce_loss
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
     for epoch in range(3):

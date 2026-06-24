@@ -40,9 +40,7 @@ ISIC_API = "https://api.isic-archive.com/api/v2/images/"
 
 # --- Model + training knobs --------------------------------------------------
 IMG_SIZE = 256
-ENCODER = "efficientnet-b0"
-ENCODER_WEIGHTS = "imagenet"          # set None to train from scratch / smoke test
-DECODER_ATTENTION = "scse"            # "scse" = attention gates in the decoder; None to disable
+BASE = 32                             # base channel width of the from-scratch Attention U-Net
 BATCH_SIZE = 16
 EPOCHS = 25
 LR = 1e-3
