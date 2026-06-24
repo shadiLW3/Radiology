@@ -14,6 +14,7 @@ Design notes:
   - The model is segmentation-only and ABSTAINS on diagnosis (model_diagnosis = null) for now.
 """
 import datetime
+import glob
 import os
 
 import numpy as np
@@ -24,6 +25,7 @@ from fastapi.staticfiles import StaticFiles
 from PIL import Image
 from pydantic import BaseModel
 
+import consensus
 import db
 import modalities
 import npi
@@ -88,7 +90,7 @@ def next_case(session_id: str, modality: str = modalities.DEFAULT_MODALITY):
 
 @app.get("/cases/{case_id}/{which}.png")
 def case_asset(case_id: str, which: str):
-    if which not in ("image", "gt", "model"):
+    if which not in ("image", "gt", "model", "consensus"):
         raise HTTPException(404)
     path = os.path.join(db.CASES_DIR, case_id, f"{which}.png")
     if not os.path.exists(path):
@@ -166,7 +168,7 @@ def attempt(a: Attempt):
     badge = cred["badge"] if cred else a.badge
     verified = 1 if cred else 0
 
-    conn.execute(
+    cur = conn.execute(
         "INSERT INTO attempts (session_id, case_id, badge, created_at, diagnosis, confidence, "
         "draw_ms, dice, iou, threshold_jaccard, hausdorff95, diagnosis_correct, "
         "beat_model_on_dice, model_dice, verified, modality) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -175,9 +177,15 @@ def attempt(a: Attempt):
          you["threshold_jaccard"], you["hausdorff95"], int(diagnosis_correct),
          int(beat), model["dice"], verified, case["modality"]),
     )
+    attempt_id = cur.lastrowid
     conn.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (a.session_id, a.case_id))
     conn.commit()
     conn.close()
+
+    # store the human mask so it can join this case's STAPLE consensus
+    hdir = os.path.join(db.CASES_DIR, a.case_id, "human")
+    os.makedirs(hdir, exist_ok=True)
+    Image.fromarray((user * 255).astype("uint8")).save(os.path.join(hdir, f"{attempt_id}.png"))
 
     return {
         "you": {**you, "diagnosis": a.diagnosis, "diagnosis_correct": diagnosis_correct},
@@ -212,6 +220,45 @@ def leaderboard():
         ],
         "model_avg_dice": round(model_avg, 4) if model_avg is not None else None,
         "expert_dice_band": EXPERT_DICE_BAND,
+    }
+
+
+@app.get("/api/consensus/{case_id}")
+def consensus_endpoint(case_id: str, session_id: str = ""):
+    """STAPLE-fuse the reference mask + all human drawings into a consensus truth."""
+    conn = db.get_conn()
+    case = conn.execute("SELECT gt_mask_path FROM cases WHERE case_id = ?", (case_id,)).fetchone()
+    if case is None:
+        conn.close()
+        raise HTTPException(404)
+    hdir = os.path.join(db.CASES_DIR, case_id, "human")
+    human_files = sorted(glob.glob(os.path.join(hdir, "*.png"))) if os.path.isdir(hdir) else []
+    if not human_files:
+        conn.close()
+        return {"available": False}
+
+    raters = [_load_mask(case["gt_mask_path"])] + [_load_mask(f) for f in human_files]
+    cons, _, _, _ = consensus.consensus_mask(raters)
+    agreement = consensus.mean_pairwise_dice(raters)
+    Image.fromarray(cons * 255).save(os.path.join(db.CASES_DIR, case_id, "consensus.png"))
+
+    your = None  # the requesting session's latest drawing vs the consensus
+    if session_id:
+        row = conn.execute(
+            "SELECT MAX(id) mid FROM attempts WHERE session_id = ? AND case_id = ?",
+            (session_id, case_id)).fetchone()
+        if row and row["mid"]:
+            yp = os.path.join(hdir, f"{row['mid']}.png")
+            if os.path.exists(yp):
+                your = round(scoring.dice_coef(_load_mask(yp), cons), 4)
+    conn.close()
+    return {
+        "available": True,
+        "n_human": len(human_files),
+        "n_raters": len(raters),
+        "agreement": round(agreement, 4),
+        "your_dice_vs_consensus": your,
+        "consensus_url": f"/cases/{case_id}/consensus.png",
     }
 
 

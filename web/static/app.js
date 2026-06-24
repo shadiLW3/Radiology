@@ -151,6 +151,7 @@ async function submit() {
   const r = await fetch("/api/attempt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   renderReveal(await r.json(), body.mask_png);
   loadLeaderboard();
+  loadConsensus(state.caseId);
 }
 function fmt(v) { return v === null || v === undefined ? "—" : v; }
 function renderReveal(d, youMask) {
@@ -190,6 +191,20 @@ async function loadLeaderboard() {
   if (d.model_avg_dice !== null)
     rows += `<tr class="model-row"><td>★ Model</td><td>—</td><td>${d.model_avg_dice}</td><td>—</td><td>—</td></tr>`;
   $("leaderboard").innerHTML = rows;
+}
+
+// --- STAPLE consensus: fuse reference + all human drawings into a fairer target ---
+async function loadConsensus(caseId) {
+  const el = $("consensus-block"); el.innerHTML = "";
+  const d = await (await fetch(`/api/consensus/${encodeURIComponent(caseId)}?session_id=${encodeURIComponent(sessionId)}`)).json();
+  if (!d.available) return;
+  el.innerHTML = `
+    <hr style="border:none;border-top:1px solid var(--line);margin:14px 0">
+    <div class="group"><label>Crowd consensus (STAPLE)</label></div>
+    <div class="thumbs">
+      <div class="thumb"><img src="${d.consensus_url}?t=${Date.now()}"><span>Consensus<br>${d.n_human} human + reference</span></div>
+    </div>
+    <p class="hint">Your Dice vs the fused consensus: <b>${d.your_dice_vs_consensus ?? "—"}</b> — the ${d.n_raters} annotators agree only ~<b>${d.agreement}</b> Dice with each other (the "even experts disagree" floor). The consensus sharpens as more people draw this case.</p>`;
 }
 
 // --- modality (registry-driven; diagnosis buttons are NOT hardcoded) ---

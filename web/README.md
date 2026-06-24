@@ -79,6 +79,15 @@ segmentation + normal/TB):
 
 Adding a 3rd modality = one new entry in `modalities.py` + its models + a bundle. No other code changes.
 
+## Consensus ground truth (STAPLE)
+
+Each locked drawing is stored, and [`backend/consensus.py`](backend/consensus.py) fuses the reference
+mask + every human drawing for a case into a probabilistic **consensus truth** via STAPLE (Warfield et
+al. 2004), weighting each annotator by its estimated reliability (sensitivity/specificity, learned by EM).
+After you lock, the reveal shows your Dice vs. this consensus plus the **inter-annotator agreement** (the
+"even experts disagree" floor) — a fairer target than one noisy mask, and it sharpens as more people play.
+`GET /api/consensus/{case_id}`.
+
 ## API
 
 | Method | Route | Purpose |
