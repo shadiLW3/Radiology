@@ -13,7 +13,7 @@ import numpy as np
 
 from config import (MANIFEST_CSV, MODEL_PATH, MODELS_DIR, REPORTS_DIR, TRAIN_CURVE,
                     ENCODER, ENCODER_WEIGHTS, BATCH_SIZE, EPOCHS, LR, IMG_SIZE,
-                    RANDOM_SEED, pick_device)
+                    RANDOM_SEED, DECODER_ATTENTION, pick_device)
 from dataset import load_manifest, split_manifest, ISICDataset
 from metrics import dice_coef
 from utils import get_logger, ensure_dir, set_seed
@@ -24,7 +24,8 @@ log = get_logger("train")
 def build_model():
     import segmentation_models_pytorch as smp
     return smp.Unet(encoder_name=ENCODER, encoder_weights=ENCODER_WEIGHTS,
-                    in_channels=3, classes=1, activation=None)
+                    in_channels=3, classes=1, activation=None,
+                    decoder_attention_type=DECODER_ATTENTION)
 
 
 def make_loss():

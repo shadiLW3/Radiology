@@ -64,7 +64,8 @@ def main() -> None:
     train_dl = DataLoader(ISICDataset(train_df, SIZE, augment=True), batch_size=8, shuffle=True)
     val_ds = ISICDataset(val_df, SIZE, augment=False)
 
-    model = smp.Unet("resnet18", encoder_weights=None, in_channels=3, classes=1)
+    model = smp.Unet("resnet18", encoder_weights=None, in_channels=3, classes=1,
+                     decoder_attention_type="scse")
     loss_fn = smp.losses.DiceLoss(mode="binary", from_logits=True)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
