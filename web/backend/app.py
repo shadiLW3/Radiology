@@ -25,6 +25,7 @@ from PIL import Image
 from pydantic import BaseModel
 
 import db
+import modalities
 import npi
 import scoring
 
@@ -50,23 +51,37 @@ def index():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
 
+@app.get("/api/modalities")
+def list_modalities():
+    """The registry + how many cases are seeded per modality (frontend renders from this)."""
+    conn = db.get_conn()
+    counts = {r[0]: r[1] for r in conn.execute(
+        "SELECT modality, COUNT(*) FROM cases GROUP BY modality").fetchall()}
+    conn.close()
+    return {"modalities": [{**m, "n_cases": counts.get(m["id"], 0)} for m in modalities.public_list()]}
+
+
 @app.get("/api/next_case")
-def next_case(session_id: str):
+def next_case(session_id: str, modality: str = modalities.DEFAULT_MODALITY):
     conn = db.get_conn()
     row = conn.execute(
-        "SELECT case_id, width, height FROM cases "
-        "WHERE case_id NOT IN (SELECT case_id FROM seen WHERE session_id = ?) "
+        "SELECT case_id, width, height, modality FROM cases "
+        "WHERE modality = ? AND case_id NOT IN (SELECT case_id FROM seen WHERE session_id = ?) "
         "ORDER BY RANDOM() LIMIT 1",
-        (session_id,),
+        (modality, session_id),
     ).fetchone()
     conn.close()
     if row is None:
         return {"case_id": None}
+    spec = modalities.get(row["modality"])
     return {
         "case_id": row["case_id"],
         "image_url": f"/cases/{row['case_id']}/image.png",
         "width": row["width"],
         "height": row["height"],
+        "modality": row["modality"],
+        "draw_target": spec["draw_target"],
+        "diagnoses": spec["diagnoses"],
         "expert_dice_band": EXPERT_DICE_BAND,
     }
 
@@ -154,11 +169,11 @@ def attempt(a: Attempt):
     conn.execute(
         "INSERT INTO attempts (session_id, case_id, badge, created_at, diagnosis, confidence, "
         "draw_ms, dice, iou, threshold_jaccard, hausdorff95, diagnosis_correct, "
-        "beat_model_on_dice, model_dice, verified) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "beat_model_on_dice, model_dice, verified, modality) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (a.session_id, a.case_id, badge, datetime.datetime.utcnow().isoformat(),
          a.diagnosis, a.confidence, a.draw_ms, you["dice"], you["iou"],
          you["threshold_jaccard"], you["hausdorff95"], int(diagnosis_correct),
-         int(beat), model["dice"], verified),
+         int(beat), model["dice"], verified, case["modality"]),
     )
     conn.execute("INSERT OR IGNORE INTO seen VALUES (?,?)", (a.session_id, a.case_id))
     conn.commit()

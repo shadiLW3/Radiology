@@ -60,6 +60,24 @@ python app.py
 Now the reveal shows the model's benign/malignant call, whether it was right, and whether you agreed.
 No classifier present → it just abstains (the segmentation game still works).
 
+## Chest X-ray & other modalities
+
+The platform is **modality-agnostic** via a registry ([`backend/modalities.py`](backend/modalities.py)):
+each modality is one declarative entry (label, draw target, model filenames, diagnosis vocabulary) and the
+backend/frontend *read the spec* instead of branching on the name. To add **chest X-ray** (lung-field
+segmentation + normal/TB):
+
+1. Run [`ml/notebooks/phase4_chest_xray_colab.ipynb`](../ml/notebooks/phase4_chest_xray_colab.ipynb) →
+   `unet_cxr.onnx`, `classifier_cxr.onnx`, `case_bundle_cxr.zip`.
+2. Put the two ONNX files in `ml/models/`, then:
+   ```bash
+   python load_bundle.py ~/Downloads/case_bundle_cxr.zip
+   python seed_cases.py --modality chest_xray --bundle ../data/bundle/bundle
+   ```
+3. Reseeding one modality leaves the others intact; the UI's **Modality** picker switches between them.
+
+Adding a 3rd modality = one new entry in `modalities.py` + its models + a bundle. No other code changes.
+
 ## API
 
 | Method | Route | Purpose |

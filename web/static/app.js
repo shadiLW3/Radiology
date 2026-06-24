@@ -10,7 +10,7 @@ if (!sessionId) { sessionId = "s_" + Math.random().toString(36).slice(2) + Date.
 // --- state ---
 const state = { tool: "lasso", brush: 22, dx: null, conf: 50, locked: false, caseId: null,
   imageUrl: null, t0: 0, shapes: [], drawing: null, panMode: false,
-  expertBand: [0.75, 0.81], verifiedBadge: null };
+  modality: "dermoscopy", diagnoses: [], expertBand: [0.75, 0.81], verifiedBadge: null };
 
 // --- Konva ---
 const stage = new Konva.Stage({ container: "stage", width: DISPLAY, height: DISPLAY });
@@ -34,7 +34,7 @@ function updateLockEnabled() {
   if (state.locked) msg = "";
   else if (needDraw && needDx) msg = "Draw the lesion and pick a diagnosis to unlock.";
   else if (needDraw) msg = "Draw the lesion to unlock.";
-  else if (needDx) msg = "Pick a diagnosis (benign / malignant) to unlock.";
+  else if (needDx) msg = "Pick a diagnosis to unlock.";
   else msg = "Ready — lock to reveal. The model's answer stays hidden until you do.";
   $("lock-hint").textContent = msg;
 }
@@ -69,16 +69,16 @@ function loadCaseImage(url) {
   });
 }
 async function loadNextCase() {
-  const r = await fetch(`/api/next_case?session_id=${encodeURIComponent(sessionId)}`);
+  const r = await fetch(`/api/next_case?session_id=${encodeURIComponent(sessionId)}&modality=${encodeURIComponent(state.modality)}`);
   const data = await r.json();
   $("reveal-card").classList.remove("show");
   state.locked = false; state.dx = null; state.shapes = []; state.drawing = null;
   drawLayer.destroyChildren(); drawLayer.draw(); resetView();
-  document.querySelectorAll(".dx").forEach((b) => b.classList.remove("active"));
-  if (!data.case_id) { $("case-title").textContent = "🎉 You've seen every case — nice work."; $("lock").disabled = true; $("lock-hint").textContent = ""; return; }
+  if (!data.case_id) { $("case-title").textContent = "No unseen cases for this modality — switch modality or seed more."; $("lock").disabled = true; $("lock-hint").textContent = ""; $("dx-buttons").innerHTML = ""; return; }
   state.caseId = data.case_id; state.imageUrl = data.image_url;
   state.expertBand = data.expert_dice_band || state.expertBand;
-  $("case-title").textContent = "Case " + data.case_id + " — trace the lesion border";
+  renderDxButtons(data.diagnoses || []);
+  $("case-title").textContent = `Case ${data.case_id} — trace ${data.draw_target || "the region"}`;
   await loadCaseImage(data.image_url);
   state.t0 = Date.now();
   updateLockEnabled();
@@ -178,6 +178,29 @@ async function loadLeaderboard() {
   $("leaderboard").innerHTML = rows;
 }
 
+// --- modality (registry-driven; diagnosis buttons are NOT hardcoded) ---
+function renderDxButtons(diagnoses) {
+  state.diagnoses = diagnoses; state.dx = null;
+  const wrap = $("dx-buttons"); wrap.innerHTML = "";
+  for (const d of diagnoses) {
+    const b = document.createElement("button");
+    b.className = "dx"; b.textContent = d.charAt(0).toUpperCase() + d.slice(1);
+    b.onclick = () => { state.dx = d; wrap.querySelectorAll(".dx").forEach((x) => x.classList.toggle("active", x === b)); updateLockEnabled(); };
+    wrap.appendChild(b);
+  }
+}
+async function loadModalities() {
+  const d = await (await fetch("/api/modalities")).json();
+  const sel = $("modality"); sel.innerHTML = "";
+  for (const m of d.modalities) {
+    const o = document.createElement("option");
+    o.value = m.id; o.textContent = m.label + (m.n_cases ? "" : " (no cases yet)");
+    sel.appendChild(o);
+  }
+  state.modality = sel.value || "dermoscopy";
+  sel.onchange = () => { state.modality = sel.value; loadNextCase(); };
+}
+
 // --- NPI credential verification ---
 function renderCredential(d) {
   const el = $("cred-status");
@@ -206,11 +229,6 @@ $("brightness").oninput = $("contrast").oninput = () => {
   $("contrast-val").textContent = (+$("contrast").value).toFixed(2);
   $("stage-wrap").style.filter = `brightness(${$("brightness").value}) contrast(${$("contrast").value})`;
 };
-document.querySelectorAll(".dx").forEach((b) => b.onclick = () => {
-  state.dx = b.dataset.dx;
-  document.querySelectorAll(".dx").forEach((x) => x.classList.toggle("active", x === b));
-  updateLockEnabled();
-});
 $("undo").onclick = undo;
 $("clear").onclick = clearAll;
 $("reset-view").onclick = resetView;
@@ -232,6 +250,6 @@ window.addEventListener("keydown", (e) => {
 window.addEventListener("keyup", (e) => { if (e.code === "Space") setPan(false); });
 $("stage-wrap").style.cursor = "crosshair";
 
-loadNextCase();
+loadModalities().then(loadNextCase);
 loadLeaderboard();
 loadCredential();

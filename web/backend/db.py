@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS cases (
     case_id TEXT PRIMARY KEY,
     image_path TEXT, gt_mask_path TEXT, model_mask_path TEXT,
     gt_diagnosis TEXT, model_diagnosis TEXT,
-    width INTEGER, height INTEGER
+    width INTEGER, height INTEGER,
+    modality TEXT DEFAULT 'dermoscopy'
 );
 CREATE TABLE IF NOT EXISTS attempts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -20,7 +21,7 @@ CREATE TABLE IF NOT EXISTS attempts (
     diagnosis TEXT, confidence INTEGER, draw_ms INTEGER,
     dice REAL, iou REAL, threshold_jaccard REAL, hausdorff95 REAL,
     diagnosis_correct INTEGER, beat_model_on_dice INTEGER, model_dice REAL,
-    verified INTEGER DEFAULT 0
+    verified INTEGER DEFAULT 0, modality TEXT DEFAULT 'dermoscopy'
 );
 CREATE TABLE IF NOT EXISTS seen (
     session_id TEXT, case_id TEXT,
@@ -44,17 +45,22 @@ def get_conn():
 def init_db():
     conn = get_conn()
     conn.executescript(SCHEMA)
-    # migration: add attempts.verified to pre-existing DBs
-    cols = [r[1] for r in conn.execute("PRAGMA table_info(attempts)")]
-    if "verified" not in cols:
+    # migrations for pre-existing DBs
+    acols = [r[1] for r in conn.execute("PRAGMA table_info(attempts)")]
+    if "verified" not in acols:
         conn.execute("ALTER TABLE attempts ADD COLUMN verified INTEGER DEFAULT 0")
+    if "modality" not in acols:
+        conn.execute("ALTER TABLE attempts ADD COLUMN modality TEXT DEFAULT 'dermoscopy'")
+    ccols = [r[1] for r in conn.execute("PRAGMA table_info(cases)")]
+    if "modality" not in ccols:
+        conn.execute("ALTER TABLE cases ADD COLUMN modality TEXT DEFAULT 'dermoscopy'")
     conn.commit()
     conn.close()
 
 
-def reset_cases():
-    """Drop existing cases (used by seed_cases for a clean reseed)."""
+def reset_modality(modality):
+    """Drop existing cases for ONE modality (so modalities coexist on reseed)."""
     conn = get_conn()
-    conn.execute("DELETE FROM cases")
+    conn.execute("DELETE FROM cases WHERE modality = ?", (modality,))
     conn.commit()
     conn.close()

@@ -1,71 +1,64 @@
-"""ONNX wrappers, both precomputed at SEED time (live play does no inference):
+"""ONNX serving — generic over modality (reads the registry, never branches on it).
 
-  - U-Net SEGMENTATION  -> predict_mask  (ml/models/unet.onnx, required)
-  - benign/malignant CLASSIFIER -> predict_diagnosis (ml/models/classifier.onnx, OPTIONAL)
-
-If classifier.onnx is absent, predict_diagnosis returns None and the model simply
-abstains on the diagnosis channel (the segmentation head-to-head still works).
+predict_mask / predict_diagnosis take a modality id, look up its model filenames in
+modalities.py, and lazy-load + cache one InferenceSession per file. Both are called
+at SEED time only (live play is a DB/file read).
 """
 import os
 
 import numpy as np
 
+import modalities
+
 BASE = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.normpath(os.path.join(BASE, "..", "..", "ml", "models"))
-ONNX_PATH = os.path.join(MODELS_DIR, "unet.onnx")
-CLF_ONNX_PATH = os.path.join(MODELS_DIR, "classifier.onnx")
 
 IMG_SIZE = 256
 MEAN = np.array((0.485, 0.456, 0.406), np.float32)
 STD = np.array((0.229, 0.224, 0.225), np.float32)
 
-_seg = None
-_clf = None
+_sessions = {}  # filename -> ort.InferenceSession
 
 
-def _session(path):
-    import onnxruntime as ort
-    return ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+def _session(filename):
+    """Lazy-load + cache an ONNX session by filename; None if the file is absent."""
+    if filename not in _sessions:
+        path = os.path.join(MODELS_DIR, filename)
+        if not os.path.exists(path):
+            _sessions[filename] = None
+        else:
+            import onnxruntime as ort
+            _sessions[filename] = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+    return _sessions[filename]
 
 
 def _preprocess(pil_image):
     img = pil_image.convert("RGB").resize((IMG_SIZE, IMG_SIZE))
-    x = np.asarray(img, np.float32) / 255.0
-    x = (x - MEAN) / STD
+    x = (np.asarray(img, np.float32) / 255.0 - MEAN) / STD
     return x.transpose(2, 0, 1)[None]  # [1,3,256,256]
 
 
-def predict_mask(pil_image, threshold=0.5):
-    """PIL RGB -> binary uint8 [256,256] lesion mask."""
-    global _seg
-    if _seg is None:
-        if not os.path.exists(ONNX_PATH):
-            raise FileNotFoundError(
-                f"Model not found at {ONNX_PATH}. Run the Phase 0 spike / Colab export first."
-            )
-        _seg = _session(ONNX_PATH)
+def predict_mask(pil_image, modality, threshold=0.5):
+    """PIL image + modality -> binary uint8 [256,256] segmentation mask."""
+    spec = modalities.get(modality)
+    sess = _session(spec["seg_model"])
+    if sess is None:
+        raise FileNotFoundError(
+            f"Segmentation model {spec['seg_model']} missing in {MODELS_DIR} for '{modality}'.")
     x = _preprocess(pil_image)
-    logits = _seg.run(None, {_seg.get_inputs()[0].name: x})[0][0, 0]
-    prob = 1.0 / (1.0 + np.exp(-logits))
-    return (prob >= threshold).astype(np.uint8)
+    logits = sess.run(None, {sess.get_inputs()[0].name: x})[0][0, 0]
+    return (1.0 / (1.0 + np.exp(-logits)) >= threshold).astype(np.uint8)
 
 
-def has_classifier():
-    return os.path.exists(CLF_ONNX_PATH)
-
-
-def predict_diagnosis(pil_image, threshold=0.5):
-    """PIL RGB -> 'benign' | 'malignant', or None if no classifier is installed.
-
-    Expects a single-logit classifier where sigmoid(logit) = P(malignant).
-    """
-    global _clf
-    if not has_classifier():
+def predict_diagnosis(pil_image, modality, threshold=0.5):
+    """PIL image + modality -> the modality's positive/negative diagnosis label,
+    or None if that modality's classifier isn't installed (model abstains)."""
+    spec = modalities.get(modality)
+    sess = _session(spec["clf_model"])
+    if sess is None:
         return None
-    if _clf is None:
-        _clf = _session(CLF_ONNX_PATH)
     x = _preprocess(pil_image)
-    out = _clf.run(None, {_clf.get_inputs()[0].name: x})[0]
-    logit = float(np.asarray(out).flatten()[0])
-    p = 1.0 / (1.0 + np.exp(-logit))
-    return "malignant" if p >= threshold else "benign"
+    out = sess.run(None, {sess.get_inputs()[0].name: x})[0]
+    p = 1.0 / (1.0 + np.exp(-float(np.asarray(out).flatten()[0])))  # P(positive)
+    neg, pos = spec["diagnoses"]
+    return pos if p >= threshold else neg

@@ -12,6 +12,10 @@
   <div class="wrap">
     <header>
       <h1>MedVS-AI <small>— draw the lesion, diagnose it, then see how you did vs. the model</small></h1>
+      <div class="group" style="min-width:180px">
+        <label for="modality">Modality</label>
+        <select id="modality"></select>
+      </div>
       <div class="group" style="min-width:200px">
         <label for="badge">Your background (unverified)</label>
         <select id="badge">
@@ -75,10 +79,7 @@
 
           <div class="group">
             <label>Your diagnosis</label>
-            <div class="btnrow">
-              <button class="dx" data-dx="benign">Benign</button>
-              <button class="dx" data-dx="malignant">Malignant</button>
-            </div>
+            <div class="btnrow" id="dx-buttons"></div>
           </div>
           <div class="group">
             <label>Confidence: <span id="conf-val">50</span>%</label>
