@@ -5,6 +5,7 @@ Then:  python seed_cases.py --bundle <out_dir>
 """
 import csv
 import os
+import shutil
 import sys
 import zipfile
 
@@ -16,13 +17,17 @@ def main():
     zip_path = sys.argv[1]
     out_dir = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "data", "bundle")
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir)          # fresh extract — avoids stale folders from a previous bundle
     os.makedirs(out_dir, exist_ok=True)
     with zipfile.ZipFile(zip_path) as z:
         z.extractall(out_dir)
-    # the zip may contain a top-level 'bundle/' folder; normalize
+    # find the folder that holds images/ + labels.csv, whatever it's named (bundle, bundle_cxr, ...)
     root = out_dir
-    if os.path.isdir(os.path.join(out_dir, "bundle")) and not os.path.isdir(os.path.join(out_dir, "images")):
-        root = os.path.join(out_dir, "bundle")
+    for dp, dns, fns in os.walk(out_dir):
+        if "images" in dns and "labels.csv" in fns:
+            root = dp
+            break
 
     images = os.path.join(root, "images")
     gt = os.path.join(root, "gt")

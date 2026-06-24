@@ -72,7 +72,8 @@ segmentation + normal/TB):
 2. Put the two ONNX files in `ml/models/`, then:
    ```bash
    python load_bundle.py ~/Downloads/case_bundle_cxr.zip
-   python seed_cases.py --modality chest_xray --bundle ../data/bundle/bundle
+   # load_bundle prints the exact --bundle path (for CXR it's ../data/bundle/bundle_cxr):
+   python seed_cases.py --modality chest_xray --bundle ../data/bundle/bundle_cxr
    ```
 3. Reseeding one modality leaves the others intact; the UI's **Modality** picker switches between them.
 

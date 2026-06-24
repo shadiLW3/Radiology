@@ -184,7 +184,7 @@ function renderDxButtons(diagnoses) {
   const wrap = $("dx-buttons"); wrap.innerHTML = "";
   for (const d of diagnoses) {
     const b = document.createElement("button");
-    b.className = "dx"; b.textContent = d.charAt(0).toUpperCase() + d.slice(1);
+    b.className = "dx"; b.textContent = d.length <= 3 ? d.toUpperCase() : d.charAt(0).toUpperCase() + d.slice(1);
     b.onclick = () => { state.dx = d; wrap.querySelectorAll(".dx").forEach((x) => x.classList.toggle("active", x === b)); updateLockEnabled(); };
     wrap.appendChild(b);
   }
