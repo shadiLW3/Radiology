@@ -42,7 +42,10 @@
     <div class="card" id="play-card">
       <h2 id="case-title">Case</h2>
       <div class="row">
-        <div class="stage-wrap" id="stage-wrap"><div id="stage"></div></div>
+        <div>
+          <div class="stage-wrap" id="stage-wrap"><div id="stage"></div></div>
+          <p class="hint" style="max-width:480px">🔍 scroll to zoom · hold <b>space</b> + drag to pan · <b>[ ]</b> brush size · <b>1/2/3</b> tools · <b>z</b> undo</p>
+        </div>
         <div class="controls">
           <div class="group">
             <label>Tool</label>
@@ -57,13 +60,17 @@
             <input type="range" id="brush-size" min="4" max="60" value="22">
           </div>
           <div class="group">
-            <label>Image brightness / contrast</label>
+            <label>Brightness: <span id="bright-val">1.00</span></label>
             <input type="range" id="brightness" min="0.5" max="1.6" step="0.01" value="1">
+          </div>
+          <div class="group">
+            <label>Contrast: <span id="contrast-val">1.00</span></label>
             <input type="range" id="contrast" min="0.5" max="2" step="0.01" value="1">
           </div>
           <div class="btnrow">
             <button id="undo">Undo</button>
             <button id="clear">Clear</button>
+            <button id="reset-view">Reset view</button>
           </div>
 
           <div class="group">
@@ -79,7 +86,7 @@
           </div>
 
           <button id="lock" class="primary" disabled>Lock &amp; reveal</button>
-          <p class="hint">The model's answer stays hidden until you lock — that keeps the head-to-head honest.</p>
+          <p class="hint" id="lock-hint"></p>
         </div>
       </div>
     </div>
@@ -89,6 +96,7 @@
       <h2>Reveal</h2>
       <div class="verdict" id="verdict"></div>
       <div class="thumbs">
+        <div class="thumb"><img id="rv-image"><span>Image</span></div>
         <div class="thumb"><img id="rv-you"><span>You</span></div>
         <div class="thumb"><img id="rv-model"><span>Model</span></div>
         <div class="thumb"><img id="rv-gt"><span>Ground truth</span></div>

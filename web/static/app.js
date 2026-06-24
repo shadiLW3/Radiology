@@ -1,13 +1,16 @@
 // MedVS-AI Phase 1 — vanilla JS + Konva. Draw the lesion -> lock -> reveal vs the model.
-const DISPLAY = 480;        // stage size in px (drawing happens 1:1 in image space)
+const DISPLAY = 480;        // stage size in px
 const GRID = 256;           // server scoring grid; export at this resolution
+const K = GRID / DISPLAY;   // image-space -> grid scale
 
 // --- session ---
 let sessionId = localStorage.getItem("medvs_session");
 if (!sessionId) { sessionId = "s_" + Math.random().toString(36).slice(2) + Date.now().toString(36); localStorage.setItem("medvs_session", sessionId); }
 
 // --- state ---
-const state = { tool: "lasso", brush: 22, dx: null, conf: 50, locked: false, caseId: null, t0: 0, shapes: [], drawing: null, expertBand: [0.75, 0.81], verifiedBadge: null };
+const state = { tool: "lasso", brush: 22, dx: null, conf: 50, locked: false, caseId: null,
+  imageUrl: null, t0: 0, shapes: [], drawing: null, panMode: false,
+  expertBand: [0.75, 0.81], verifiedBadge: null };
 
 // --- Konva ---
 const stage = new Konva.Stage({ container: "stage", width: DISPLAY, height: DISPLAY });
@@ -15,36 +18,65 @@ const imgLayer = new Konva.Layer({ listening: false });
 const drawLayer = new Konva.Layer();
 stage.add(imgLayer); stage.add(drawLayer);
 
-// --- helpers ---
 const $ = (id) => document.getElementById(id);
+const pos = () => stage.getRelativePointerPosition();   // image-space, zoom/pan-invariant
+
 function setTool(t) {
   state.tool = t;
   ["lasso", "brush", "eraser"].forEach((k) => $("tool-" + k).classList.toggle("active", k === t));
 }
-function updateLockEnabled() { $("lock").disabled = !(state.dx && state.shapes.length > 0 && !state.locked); }
+function setBrush(v) { state.brush = Math.max(4, Math.min(60, v)); $("brush-size").value = state.brush; $("size-val").textContent = state.brush; }
 
+function updateLockEnabled() {
+  const needDraw = state.shapes.length === 0, needDx = !state.dx;
+  $("lock").disabled = state.locked || needDraw || needDx;
+  let msg = "";
+  if (state.locked) msg = "";
+  else if (needDraw && needDx) msg = "Draw the lesion and pick a diagnosis to unlock.";
+  else if (needDraw) msg = "Draw the lesion to unlock.";
+  else if (needDx) msg = "Pick a diagnosis (benign / malignant) to unlock.";
+  else msg = "Ready — lock to reveal. The model's answer stays hidden until you do.";
+  $("lock-hint").textContent = msg;
+}
+
+// --- view: zoom + pan (view only; never affects stored/exported coords) ---
+function clampView() {
+  const s = stage.scaleX();
+  if (s <= 1) { stage.scale({ x: 1, y: 1 }); stage.position({ x: 0, y: 0 }); return; }
+  const min = -(s - 1) * DISPLAY;
+  stage.position({ x: Math.min(0, Math.max(min, stage.x())), y: Math.min(0, Math.max(min, stage.y())) });
+}
+stage.on("wheel", (e) => {
+  e.evt.preventDefault();
+  const old = stage.scaleX(), ptr = stage.getPointerPosition();
+  const m = { x: (ptr.x - stage.x()) / old, y: (ptr.y - stage.y()) / old };
+  let s = e.evt.deltaY > 0 ? old / 1.1 : old * 1.1;
+  s = Math.max(1, Math.min(8, s));
+  stage.scale({ x: s, y: s });
+  stage.position({ x: ptr.x - m.x * s, y: ptr.y - m.y * s });
+  clampView(); stage.batchDraw();
+});
+stage.on("dragmove", clampView);
+function setPan(on) { state.panMode = on; stage.draggable(on); $("stage-wrap").style.cursor = on ? "grab" : "crosshair"; }
+function resetView() { stage.scale({ x: 1, y: 1 }); stage.position({ x: 0, y: 0 }); stage.batchDraw(); }
+
+// --- case image ---
 function loadCaseImage(url) {
   return new Promise((res) => {
-    const im = new Image();
-    im.crossOrigin = "anonymous";
-    im.onload = () => {
-      imgLayer.destroyChildren();
-      imgLayer.add(new Konva.Image({ image: im, width: DISPLAY, height: DISPLAY }));
-      imgLayer.draw(); res();
-    };
+    const im = new Image(); im.crossOrigin = "anonymous";
+    im.onload = () => { imgLayer.destroyChildren(); imgLayer.add(new Konva.Image({ image: im, width: DISPLAY, height: DISPLAY })); imgLayer.draw(); res(); };
     im.src = url + "?t=" + Date.now();
   });
 }
-
 async function loadNextCase() {
   const r = await fetch(`/api/next_case?session_id=${encodeURIComponent(sessionId)}`);
   const data = await r.json();
   $("reveal-card").classList.remove("show");
   state.locked = false; state.dx = null; state.shapes = []; state.drawing = null;
-  drawLayer.destroyChildren(); drawLayer.draw();
+  drawLayer.destroyChildren(); drawLayer.draw(); resetView();
   document.querySelectorAll(".dx").forEach((b) => b.classList.remove("active"));
-  if (!data.case_id) { $("case-title").textContent = "🎉 You've seen every case — nice work."; $("lock").disabled = true; return; }
-  state.caseId = data.case_id;
+  if (!data.case_id) { $("case-title").textContent = "🎉 You've seen every case — nice work."; $("lock").disabled = true; $("lock-hint").textContent = ""; return; }
+  state.caseId = data.case_id; state.imageUrl = data.image_url;
   state.expertBand = data.expert_dice_band || state.expertBand;
   $("case-title").textContent = "Case " + data.case_id + " — trace the lesion border";
   await loadCaseImage(data.image_url);
@@ -54,50 +86,61 @@ async function loadNextCase() {
 
 // --- drawing ---
 function strokeOpts() {
-  if (state.tool === "eraser")
-    return { stroke: "#000", strokeWidth: state.brush, lineCap: "round", lineJoin: "round", globalCompositeOperation: "destination-out" };
-  if (state.tool === "brush")
-    return { stroke: "rgba(229,57,53,0.55)", strokeWidth: state.brush, lineCap: "round", lineJoin: "round" };
+  if (state.tool === "eraser") return { stroke: "#000", strokeWidth: state.brush, lineCap: "round", lineJoin: "round", globalCompositeOperation: "destination-out" };
+  if (state.tool === "brush") return { stroke: "rgba(229,57,53,0.55)", strokeWidth: state.brush, lineCap: "round", lineJoin: "round" };
   return { stroke: "rgba(229,57,53,0.9)", strokeWidth: 2, closed: false, fill: "rgba(229,57,53,0.4)" }; // lasso
 }
 stage.on("pointerdown", () => {
-  if (state.locked) return;
-  const p = stage.getPointerPosition();
+  if (state.locked || state.panMode) return;
+  const p = pos();
   const line = new Konva.Line({ points: [p.x, p.y], ...strokeOpts() });
-  drawLayer.add(line); state.drawing = line;
+  drawLayer.add(line);
+  state.drawing = { node: line, tool: state.tool, width: state.brush };
 });
 stage.on("pointermove", () => {
   if (!state.drawing) return;
-  const p = stage.getPointerPosition();
-  state.drawing.points(state.drawing.points().concat([p.x, p.y]));
+  const p = pos();
+  state.drawing.node.points(state.drawing.node.points().concat([p.x, p.y]));
   drawLayer.batchDraw();
 });
 stage.on("pointerup", () => {
   if (!state.drawing) return;
-  if (state.tool === "lasso") state.drawing.closed(true);
+  if (state.drawing.tool === "lasso") state.drawing.node.closed(true);
   drawLayer.batchDraw();
   state.shapes.push(state.drawing); state.drawing = null;
   updateLockEnabled();
 });
+function undo() { const s = state.shapes.pop(); if (s) { s.node.destroy(); drawLayer.draw(); } updateLockEnabled(); }
+function clearAll() { state.shapes.forEach((s) => s.node.destroy()); state.shapes = []; drawLayer.draw(); updateLockEnabled(); }
 
-function exportMaskDataUrl() { return drawLayer.toDataURL({ pixelRatio: GRID / DISPLAY, mimeType: "image/png" }); }
+// Rasterize stored image-space strokes onto a 256x256 mask (transform-independent).
+function exportMaskDataUrl() {
+  const c = document.createElement("canvas"); c.width = GRID; c.height = GRID;
+  const ctx = c.getContext("2d");
+  ctx.lineCap = "round"; ctx.lineJoin = "round"; ctx.strokeStyle = "#fff"; ctx.fillStyle = "#fff";
+  for (const s of state.shapes) {
+    const pts = s.node.points(); if (pts.length < 4) continue;
+    ctx.globalCompositeOperation = s.tool === "eraser" ? "destination-out" : "source-over";
+    ctx.beginPath(); ctx.moveTo(pts[0] * K, pts[1] * K);
+    for (let i = 2; i < pts.length; i += 2) ctx.lineTo(pts[i] * K, pts[i + 1] * K);
+    if (s.tool === "lasso") { ctx.closePath(); ctx.fill(); }
+    else { ctx.lineWidth = Math.max(1, s.width * K); ctx.stroke(); }
+  }
+  return c.toDataURL("image/png");
+}
 
 // --- submit / reveal ---
 async function submit() {
-  state.locked = true; $("lock").disabled = true;
-  const body = {
-    session_id: sessionId, case_id: state.caseId, badge: $("badge").value,
-    diagnosis: state.dx, confidence: state.conf, mask_png: exportMaskDataUrl(),
-    draw_ms: Date.now() - state.t0,
-  };
+  state.locked = true; $("lock").disabled = true; $("lock-hint").textContent = "";
+  const body = { session_id: sessionId, case_id: state.caseId, badge: $("badge").value,
+    diagnosis: state.dx, confidence: state.conf, mask_png: exportMaskDataUrl(), draw_ms: Date.now() - state.t0 };
   const r = await fetch("/api/attempt", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  const d = await r.json();
-  renderReveal(d, body.mask_png);
+  renderReveal(await r.json(), body.mask_png);
   loadLeaderboard();
 }
-
 function fmt(v) { return v === null || v === undefined ? "—" : v; }
 function renderReveal(d, youMask) {
+  $("rv-image").src = state.imageUrl + "?t=" + Date.now();
   $("rv-you").src = youMask;
   $("rv-model").src = d.masks.model_url + "?t=" + Date.now();
   $("rv-gt").src = d.masks.gt_url + "?t=" + Date.now();
@@ -143,30 +186,24 @@ function renderCredential(d) {
     const nm = d.name_match === false ? " (name didn't match — counted as unverified-name)" : "";
     el.innerHTML = `<span class="pill ok">✓ Verified: ${d.badge}${d.specialty ? " — " + d.specialty : ""}</span> Your attempts now count as <b>${d.badge}</b>.${nm}`;
     $("badge").disabled = true;
-  } else {
-    state.verifiedBadge = null;
-    el.textContent = "Not verified — you'll play as your self-reported background.";
-    $("badge").disabled = false;
-  }
+  } else { state.verifiedBadge = null; el.textContent = "Not verified — you'll play as your self-reported background."; $("badge").disabled = false; }
 }
-async function loadCredential() {
-  const d = await (await fetch(`/api/credential?session_id=${encodeURIComponent(sessionId)}`)).json();
-  renderCredential(d);
-}
+async function loadCredential() { renderCredential(await (await fetch(`/api/credential?session_id=${encodeURIComponent(sessionId)}`)).json()); }
 async function verifyNpi() {
   const body = { session_id: sessionId, npi: $("npi").value.trim(), first_name: $("npi-first").value.trim(), last_name: $("npi-last").value.trim() };
   $("verify-btn").disabled = true; $("verify-btn").textContent = "Checking…";
   const d = await (await fetch("/api/verify_npi", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })).json();
   $("verify-btn").disabled = false; $("verify-btn").textContent = "Verify";
-  if (d.ok) renderCredential(d);
-  else $("cred-status").innerHTML = `<span class="pill no">${d.message}</span>`;
+  if (d.ok) renderCredential(d); else $("cred-status").innerHTML = `<span class="pill no">${d.message}</span>`;
 }
 
 // --- wiring ---
 ["lasso", "brush", "eraser"].forEach((k) => $("tool-" + k).onclick = () => setTool(k));
-$("brush-size").oninput = (e) => { state.brush = +e.target.value; $("size-val").textContent = e.target.value; };
+$("brush-size").oninput = (e) => setBrush(+e.target.value);
 $("confidence").oninput = (e) => { state.conf = +e.target.value; $("conf-val").textContent = e.target.value; };
 $("brightness").oninput = $("contrast").oninput = () => {
+  $("bright-val").textContent = (+$("brightness").value).toFixed(2);
+  $("contrast-val").textContent = (+$("contrast").value).toFixed(2);
   $("stage-wrap").style.filter = `brightness(${$("brightness").value}) contrast(${$("contrast").value})`;
 };
 document.querySelectorAll(".dx").forEach((b) => b.onclick = () => {
@@ -174,11 +211,26 @@ document.querySelectorAll(".dx").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".dx").forEach((x) => x.classList.toggle("active", x === b));
   updateLockEnabled();
 });
-$("undo").onclick = () => { const s = state.shapes.pop(); if (s) { s.destroy(); drawLayer.draw(); } updateLockEnabled(); };
-$("clear").onclick = () => { state.shapes.forEach((s) => s.destroy()); state.shapes = []; drawLayer.draw(); updateLockEnabled(); };
+$("undo").onclick = undo;
+$("clear").onclick = clearAll;
+$("reset-view").onclick = resetView;
 $("lock").onclick = submit;
 $("next").onclick = loadNextCase;
 $("verify-btn").onclick = verifyNpi;
+
+// keyboard shortcuts (ignored while typing in inputs)
+window.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "SELECT") return;
+  if (e.code === "Space" && !state.locked) { e.preventDefault(); if (!state.panMode) setPan(true); }
+  else if (e.key === "[") setBrush(state.brush - 4);
+  else if (e.key === "]") setBrush(state.brush + 4);
+  else if (e.key === "z" || e.key === "Z") undo();
+  else if (e.key === "1") setTool("lasso");
+  else if (e.key === "2") setTool("brush");
+  else if (e.key === "3") setTool("eraser");
+});
+window.addEventListener("keyup", (e) => { if (e.code === "Space") setPan(false); });
+$("stage-wrap").style.cursor = "crosshair";
 
 loadNextCase();
 loadLeaderboard();
